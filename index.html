@@ -1,0 +1,277 @@
+<!--
+    @title
+        index.html
+
+    @author
+        typedef
+
+    @description
+        with the GUI module removed and /luar being pushed, parallax_gui has been changed to a web menu.
+-->
+<html lang="en">
+<head>
+
+    <!-- title -->
+    <title>parallax_gui.lua</title>
+
+    <!-- stylesheet references -->
+    <link rel="preconnect" href="https://fonts.gstatic.com">
+    <link href="https://fonts.googleapis.com/css2?family=Ubuntu+Mono&display=swap" rel="stylesheet">
+
+    <!-- jquery -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+
+    <!-- basic page styling -->
+    <style>
+        body
+        {
+            background-color: #1a1a1a;
+            font-family: 'Ubuntu Mono', monospace;
+            color: white;
+        }
+
+        .to_center
+        {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #title
+        {
+            font-size: 32px;
+        }
+
+        #settings
+        {
+            font-size: 20px;
+            margin-top: 100px;
+        }
+
+        input[type=range], label
+        {
+            vertical-align: middle;
+        }
+
+        #launch
+        {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+
+<!-- todo: show user avatar via getMember? -->
+<div id="title" class="to_center">parallax_gui.lua</div>
+
+<!-- widget content -->
+<div id="settings"></div>
+
+<!-- launch -->
+<div id="launch">
+    <input type="button" value="Launch" />
+</div>
+
+
+<!-- the modal for describing each setting -->
+<div id="modal" style="display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
+    <div style="margin: 15% auto; padding: 20px; width: 50%; background: white; color: black;">
+        <p id="modal_desc"></p>
+        <button id="modal_close">Close</button>
+    </div>
+</div>
+
+<script>
+    /**
+     * this contains the list of settings parallax_gui will handle. This will only consider constellation.lua settings. adding other settings will not work without modifying other functions and the parallax_gui.lua script.
+     * @type {string[][]}
+     */
+    const settings = [
+        ["Editor Mode", "editor_mode", "Editor Mode should only be disabled if you are 100% certain you do not plan to edit your configuration again. If you load Parallax with this, the configuration cannot be changed until you restart your system and turn this mode off.", "checkbox" ],
+        ["Start Enabled", "enabled_on_load", "When Parallax2 loads its driver, have the auto-clicker automatically enabled.", "checkbox" ],
+        ["Delay", "delay", "This is the delay time after your mouse button was clicked.", "range", `min="0" max="1000" value="100"` ],
+        ["Release Delay", "release_delay", "This is the delay time after your mouse button was clicked and before it is released.", "range", `min="0" max="1000" value="20"` ],
+        ["Delay Random", "max_delay_random", "This adds randomness to the delay time.", "range", `min="0" max="1000" value="100"` ],
+        ["Release Delay Random", "max_release_delay_random", "This adds randomness to the release delay time.", "range", `min="0" max="1000" value="100"` ],
+        ["Jitter", "max_jitter", "This creates a range in how much you want your mouse to jitter. This number becomes randomized within a range of min amd max.<br /><br />For example: If your max_jitter is 5. That means your X and Y axis on your mouse will either go from -5 to 5 independently. Meaning, your X can go to 3, and your Y might to -4.", "range", `min="0" max="20" value="5"` ],
+        ["Modifier Key", "mod", "This key is the modifier key. Having this key down while pressing the panic key will change the related setting. You can find key codes here: https://cherrytree.at/misc/vk.htm", "range", `min="0" max="255" value="160"` ],
+        ["Activate Key", "activate", "This key activates the auto-clicker. You can find key codes here: https://cherrytree.at/misc/vk.htm", "range", `min="0" max="255" value="20"` ],
+        ["Panic Key", "panic", "This key disables/enables the auto-clicker. This must be pressed while holding down your modifier key. You can find key codes here: https://cherrytree.at/misc/vk.htm", "range", `min="0" max="255" value="20"` ],
+    ];
+
+    /**
+     * displays the modal with a description
+     * @param desc
+     */
+    function display_description( desc )
+    {
+        $("#modal_desc").html(desc);
+        $('#modal').show();
+    }
+
+    /**
+     * replaces spaces with underscores
+     * @param str
+     * @returns {*}
+     */
+    function format_setting( str )
+    {
+        return str.replace(/ /g, "_" );
+    }
+
+    /**
+     * gets the member's local configuration. see parallax_gui.lua.
+     */
+    function reload_configuration( )
+    {
+        /**
+         * send a flag to on_http_request in parallax_gui.lua that we want configuration values.
+         * @type {{get_config: boolean}}
+         */
+        const post_data =
+            {
+                get_config: true
+            }
+
+        /**
+         * /luar POST request to Universe4
+         */
+        $.post("http://localhost:9282/luar", JSON.stringify(post_data) )
+            .done(function(data)
+            {
+                /**
+                 * debug
+                 */
+                console.log(data);
+
+                /**
+                 * validate the configuration
+                 */
+                const parallax_conf = data["Parallax2"];
+                if (!parallax_conf) {
+                    alert("It looks like you don't have a Parallax2 configuration. You will have to ");
+                    return;
+                }
+
+                /**
+                 * loop through each configuration value in constellation.lua.
+                 *
+                 * by doing so, we are going to match the key with the `settings` value we associated with it. once we found the correct element, we will then check if it is a checkbox or a range. depending on the result, the value will change.
+                 *
+                 * this is how the configuration automatically sync your configuration upon loading.
+                 */
+                for( const key in parallax_conf )
+                {
+                    for( let i = 0; i < settings.length; i ++ )
+                    {
+                        console.log(key);
+                        if( settings[i][1] === key )
+                        {
+                            const setting_name = format_setting(settings[ i ][ 0 ]);
+                            if( settings[i][3] === "checkbox" )
+                            {
+                                $(`#settings_${setting_name}`).prop( "checked", parallax_conf[key] );
+                            }
+                            else if( settings[i][3] === "range" )
+                            {
+                                $(`#settings_${setting_name}`).val( parallax_conf[key] );
+
+                                $(`#value_${setting_name}`).html( `<span id="value_${setting_name}"> (` + parallax_conf[key] + ")</span> " );
+                            }
+                        }
+                    }
+                }
+
+            })
+            .fail(function()
+            {
+                alert("Configuration could not be loaded. Universe4 must be running.");
+            });
+    }
+
+    /**
+     * page ready
+     */
+    $(document).ready(function()
+    {
+        /**
+         * loop through our settings and build our widgets based on the data in the array.
+         */
+        for( let i = 0; i < settings.length; i ++ )
+        {
+            const setting_name = format_setting(settings[ i ][ 0 ]);
+            let id_settings = $("#settings");
+
+            id_settings.append(`<label for="settings_${setting_name}" id="lbl_settings_${setting_name}">
+            <input ${settings[i][4]} type="${settings[i][3]}" id="settings_${setting_name}" onchange="on_value_changed('${setting_name}', '${settings[i][1]}')"> ${settings[i][0]} <span onclick="display_description('${settings[i][2]}')">[?]</span>`);
+
+            if( settings[i][3] === "range" )
+            {
+                id_settings.append( `<span id="value_${setting_name}"> (` + $(`#settings_${setting_name}`).attr("value") + ")</span> " );
+            }
+
+            id_settings.append("<br />");
+        }
+
+        /**
+         * update our configuration for the widgets.
+         */
+        reload_configuration();
+    });
+
+    /**
+     * updates the configuration inside Universe4.
+     * @param setting
+     * @param config
+     */
+    function on_value_changed( setting, config )
+    {
+        let id_settings = $(`#settings_${setting}`);
+
+        /**
+         * update the value if applicable
+         */
+        $(`#value_${setting}`).html(`<span id="value_${setting}"> (` + id_settings.val() + ")</span> ");
+
+        /**
+         * send /luar POST request and demand a configuration change.
+         * @type {{name, value: (*|jQuery|string)}}
+         */
+        const post_data = {
+            name: config,
+            value: id_settings.attr("type") === "checkbox" ? id_settings.is(":checked") : id_settings.val()
+        };
+        $.post("http://localhost:9282/luar", JSON.stringify(post_data), function( data ) {
+            console.log(data);
+        });
+    }
+
+    /**
+     * hide modal
+     */
+    $('#modal_close').click(function()
+    {
+        $('#modal').hide();
+    });
+
+    /**
+     * launch button
+     */
+    $('#launch').click(function()
+    {
+        /**
+         * send /luar POST request and request to launch Parallax2
+         * @type {{name, value: (*|jQuery|string)}}
+         */
+        const post_data = {
+            launch: true
+        };
+        $.post("http://localhost:9282/luar", JSON.stringify(post_data), function( data ) {
+            console.log(data);
+        });
+    })
+</script>
+</body>
+
+</html>
